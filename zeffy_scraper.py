@@ -1,0 +1,210 @@
+from playwright.sync_api import sync_playwright
+from oauth2client.service_account import ServiceAccountCredentials
+import gspread
+from difflib import get_close_matches
+import traceback
+import time
+import requests
+
+GOOGLE_CREDENTIALS_FILE = "/Users/ataya1/Downloads/google-credentials.json"
+SPREADSHEET_ID = "1aYtJlAx4VnO1aCAalzAEwRdilok-uoWgltoEJcK1pOc"
+TAB_NAME = "Zeffy_Scraped_Results"
+CAMPAIGN_URL = "https://www.zeffy.com/en-US/o/fundraising/campaigns/hub?formId=02136a57-f7b9-4023-a489-9c0136a4da37&tab=payment"
+EMAIL = "atayan@elevationproject.com"
+PASSWORD = "zobfo5-tofdEf-fykbys"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyoBrKcEl6v_L1v9PslC5u_bOMQQoPT-3QACY_nNhdjkJYf5yUut1yNTY9qJSQvEOMytA/exec"
+
+COLUMNS = [
+    "Ticket Tier", "Name", "Phone number (WhatsApp preferred)", "Email", "Date of Birth", "Gender",
+    "City, State, Country (in this format please):", "What’s your current profession and professional background?",
+    "How did you hear about this retreat?",
+    "Have you done any online Elevation programs or live events? (Please specify)",
+    "Share about your connection/affiliation with Torah, Judaism, or Jewish teachings (min. 50 words)",
+    "Who is your Rabbi, Rebbetzin, or mentor if any?", "What community are you part of, if any?",
+    "Reference (name + contact info from mentor, rabbi, rebbetzin, or someone who knows you well):",
+    "Have you had any previous experience in meditation or personal transformation work? If so, please specify what kind, where and how it was for you. If not, why this and now? (min. 50 words)",
+    "What’s your main goal for this retreat?",
+    "What, if any, are your biggest concerns in attending this event (physically, emotionally, spiritually)?",
+    "In order to help us best support you, please specify if you're currently suffering from, or do you have a history of, any psychological or psychiatric challenges?",
+    "Have you been specifically diagnoses with any of the following:",
+    "If you are now, or have recently faced challenges like these, are you willing to provide a letter from a therapist or psychiatrist agreeing that this program is advisable for you? (we may or may not require this).",
+    "Have you experienced or been diagnosed with anxiety, depression or PTSD? If so, please elaborate.",
+    "Are you currently taking any psychiatric medication for them? If so, what type and for how long?",
+    "Have you experienced suicidal thoughts or attempts at any time in your life? If so, please elaborate",
+    "In the past 1-3 years, have you had any major traumatic events, or big or sudden life changes? If so, please elaborate.",
+    "Are you holding any minor or major trauma? (events like major job changes, divorce, are also helpful for us to know). If so, please elaborate.",
+    "Are you currently suffering from, or have history of, any other health conditions? If so, please specify.",
+    "Are you currently taking any other medications for mental or physical health? (please consider any medications you have taken long term). If so, please specify.",
+    "Have you undergone any surgeries in the past year? If so, please specify.",
+    "Please provide the name, phone number, and email of your current or previous therapist and/or psychiatrist (if applicable).",
+    "Do you have any allergies or dietary restrictions? If so, please specify.",
+    "For General Admission Double Occupancy Tickets: If you’re attending with a specific person (same gender or a partner), please write their full name here and make sure they list your name in their application as well. Otherwise, we cannot guarantee that you'll be accommodated together. If you’re attending alone, our carefully curated process will pair you with a like-minded individual to ensure the best possible experience.",
+    "Checkout note: at the final step of payment, Zeffy automatically prompts you to add a donation—this goes to Zeffy, not Elevation. To skip it, select “Other” and type $0. Check here to confirm you’ve read and are aware of this.",
+    "Payment Amount"
+]
+
+scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_FILE, scope)
+client = gspread.authorize(creds)
+sheet = client.open_by_key(SPREADSHEET_ID).worksheet(TAB_NAME)
+
+def login(page):
+    print("🔐 Logging in…")
+    page.goto("https://www.zeffy.com/login")
+    page.fill("input[name='email']", EMAIL)
+    page.click("button:has-text('Next')")
+    page.wait_for_selector("input[name='password']", timeout=60000)
+    page.fill("input[name='password']", PASSWORD)
+    page.click("button:has-text('Confirm')")
+    page.wait_for_url("**/o/fundraising/**", timeout=60000)
+    time.sleep(2)
+
+def scrape_and_update():
+    def has_next_page(page):
+        next_buttons = page.query_selector_all('div.MuiGrid-container button[data-test="button"]')
+        if len(next_buttons) >= 2:
+            next_button = next_buttons[1]  # Second button is the "next" arrow
+            class_attr = next_button.get_attribute("class") or ""
+            is_disabled = "Mui-disabled" in class_attr
+            return not is_disabled, next_button
+        return False, None
+
+    try:
+        sheet.resize(rows=1)
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context()
+            page = context.new_page()
+
+            login(page)
+            page.goto(CAMPAIGN_URL)
+            page.wait_for_selector('div[data-test="table-row"]', timeout=120000)
+
+            while True:
+                participant_rows = page.query_selector_all('div[data-test="table-row"]')
+                print(f"✅ Found {len(participant_rows)} participants on this page")
+
+                for idx, row in enumerate(participant_rows, start=1):
+                    try:
+                        cells = row.query_selector_all("td")
+                        name = cells[2].inner_text().strip()
+                        email = ""
+                        for line in cells[2].inner_text().split("\n"):
+                            if "@" in line:
+                                email = line.strip().lower()
+                                break
+                        if not email:
+                            print(f"⚠️ Could not find email for row {idx}, skipping.")
+                            continue
+
+                        print(f"📄 Row {idx}: name='{name}', email='{email}'")
+                        row.click()
+                        page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", timeout=10000)
+                        time.sleep(1)
+
+                        ticket_tier, amount = "", ""
+                        for attempt in range(3):
+                            ticket_tier_el = page.query_selector(".MuiDrawer-root .MuiTypography-root.MuiTypography-h6.css-1kmqxvk")
+                            if ticket_tier_el:
+                                ticket_tier = ticket_tier_el.inner_text().strip()
+                            if ticket_tier.lower() == "additional donation":
+                                fallback_tier_el = page.query_selector(".MuiDrawer-root .MuiGrid-root.MuiGrid-container.css-1d3bbye h6")
+                                ticket_tier = fallback_tier_el.inner_text().strip() if fallback_tier_el else ticket_tier
+
+                            amount_el = page.query_selector(".MuiDrawer-root h3 strong")
+                            if amount_el:
+                                amount = amount_el.inner_text().strip()
+
+                            if ticket_tier and amount:
+                                break
+                            print(f"⏳ Waiting for tier/amount (attempt {attempt+1})")
+                            time.sleep(1)
+
+                        if not ticket_tier or not amount:
+                            print(f"⚠️ Missing tier/amount for {name}, skipping.")
+                            page.query_selector(".MuiDrawer-root button[data-test='drawer-close-button']").click()
+                            page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", state="detached", timeout=10000)
+                            continue
+
+                        print(f"🎟️ Ticket Tier: {ticket_tier}")
+                        print(f"💵 Amount: {amount}")
+
+                        qa_blocks = []
+                        for attempt in range(3):
+                            qa_blocks = page.query_selector_all('p[data-test="product-answer-label"]')
+                            if qa_blocks:
+                                break
+                            print(f"🔄 Q&A not loaded yet (attempt {attempt+1})")
+                            time.sleep(1)
+
+                        if not qa_blocks:
+                            print(f"⚠️ No Q&A found for {name}, skipping.")
+                            page.query_selector(".MuiDrawer-root button[data-test='drawer-close-button']").click()
+                            page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", state="detached", timeout=10000)
+                            continue
+
+                        answers_map = {}
+                        for block in qa_blocks:
+                            question_el = block
+                            question = question_el.inner_text().strip()
+                            parent = question_el.evaluate_handle("el => el.parentElement")
+                            answer = ""
+                            input_el = parent.query_selector('input.MuiInputBase-input')
+                            if input_el:
+                                answer = input_el.get_attribute("value").strip()
+                            if not answer:
+                                dropdown_el = parent.query_selector('div[role="combobox"]')
+                                if dropdown_el:
+                                    answer = dropdown_el.inner_text().strip()
+                            if not answer:
+                                editor_el = parent.query_selector('div[data-test="answer-editor-simple-answer"]')
+                                if editor_el:
+                                    answer = " ".join(child.inner_text().strip() for child in editor_el.query_selector_all("div") if child.inner_text().strip())
+
+                            match = get_close_matches(question, COLUMNS[1:-1], n=1, cutoff=0.6)
+                            if match:
+                                answers_map[match[0]] = answer
+                                print(f"📝 Mapped: {match[0]} → {answer}")
+
+                        row_data = [ticket_tier] + [answers_map.get(col, "") for col in COLUMNS[1:-1]] + [amount]
+                        sheet.append_row(row_data)
+                        print(f"✅ Added {name} to Google Sheet")
+
+                        page.query_selector(".MuiDrawer-root button[data-test='drawer-close-button']").click()
+                        page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", state="detached", timeout=10000)
+                        time.sleep(0.5)
+
+                    except Exception as e:
+                        print(f"⚠️ Error processing {name if 'name' in locals() else idx}: {e}")
+                        traceback.print_exc()
+                        continue
+
+                has_more, next_button = has_next_page(page)
+                if has_more:
+                    print("➡️ Moving to next page…")
+                    next_button.click()
+                    page.wait_for_selector('div[data-test="table-row"]', timeout=10000)
+                    time.sleep(1)
+                else:
+                    print("⛔ No more pages")
+                    break
+
+            browser.close()
+
+            # ✅ Call the Apps Script web app once after all rows are added
+            try:
+                response = requests.get(WEB_APP_URL)
+                if response.status_code == 200:
+                    print("✅ Triggered processZeffyScrapedResults()")
+                else:
+                    print(f"⚠️ Failed to trigger Apps Script: {response.status_code}")
+            except Exception as e:
+                print(f"❌ Error calling Apps Script: {e}")
+
+    except Exception:
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    scrape_and_update()
