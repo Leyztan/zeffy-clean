@@ -6,7 +6,7 @@ from zeffy_scraper import scrape_and_update
 app = Flask(__name__)
 
 # Credential fallback for local dev
-CREDENTIALS_PATH = "etc/secrets/google-credentials.json"
+CREDENTIALS_PATH = "/etc/secrets/google-credentials.json"
 creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH)
 
 # 🧞 Genie-style UI HTML
