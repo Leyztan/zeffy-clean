@@ -68,7 +68,7 @@ def log_to_zeffy_logs(client, name, email, reason):
     log_sheet.append_row(log_row, value_input_option="RAW")
 
 
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 CREDENTIALS_PATH = "/var/render/secrets/google-credentials.json"
 creds_json = os.environ.get("GOOGLE_CREDS_JSON")
