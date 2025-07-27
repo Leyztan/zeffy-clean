@@ -68,24 +68,6 @@ def log_to_zeffy_logs(client, name, email, reason):
     log_sheet.append_row(log_row, value_input_option="RAW")
 
 
-scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-
-CREDENTIALS_PATH = "/var/render/secrets/google-credentials.json"
-creds_json = os.environ.get("GOOGLE_CREDS_JSON")
-
-if creds_json:
-    creds_dict = json.loads(creds_json)
-    creds = service_account.Credentials.from_service_account_info(creds_dict).with_scopes(scope)
-elif os.path.exists(CREDENTIALS_PATH):
-    creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH).with_scopes(scope)
-else:
-    raise ValueError("❌ Missing GOOGLE_CREDS_JSON and google-credentials.json not found.")
-
-
-
-client = gspread.authorize(creds)
-sheet = client.open_by_key(SPREADSHEET_ID).worksheet(TAB_NAME)
-
 def login(page):
     print("🔐 Logging in…")
     page.goto("https://www.zeffy.com/login")
@@ -97,7 +79,12 @@ def login(page):
     page.wait_for_url("**/o/fundraising/**", timeout=60000)
     time.sleep(2)
 
-def scrape_and_update():
+def scrape_and_update(creds=None):
+    if creds is None:
+        raise ValueError("❌ No credentials provided to scrape_and_update.")
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SPREADSHEET_ID).worksheet(TAB_NAME)
+
     def has_next_page(page):
         next_buttons = page.query_selector_all('div.MuiGrid-container button[data-test="button"]')
         if len(next_buttons) >= 2:

@@ -134,7 +134,7 @@ def index():
 def webhook():
     print("🔔 Webhook received")
     try:
-        scrape_and_update()
+        scrape_and_update(creds)
         return jsonify({"status": "success"}), 200
     except Exception as e:
         print("❌ Error:", e)
