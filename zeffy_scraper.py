@@ -120,7 +120,7 @@ def scrape_and_update(creds=None):
         sheet.resize(rows=1)
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, slow_mo=250)
             context = browser.new_context()
             page = context.new_page()
 
