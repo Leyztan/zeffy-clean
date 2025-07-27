@@ -5,14 +5,16 @@ from difflib import get_close_matches
 import traceback
 import time
 import requests
+import json
+import os
+from datetime import datetime
 
-GOOGLE_CREDENTIALS_FILE = "/Users/ataya1/Downloads/google-credentials.json"
 SPREADSHEET_ID = "1aYtJlAx4VnO1aCAalzAEwRdilok-uoWgltoEJcK1pOc"
 TAB_NAME = "Zeffy_Scraped_Results"
 CAMPAIGN_URL = "https://www.zeffy.com/en-US/o/fundraising/campaigns/hub?formId=02136a57-f7b9-4023-a489-9c0136a4da37&tab=payment"
 EMAIL = "atayan@elevationproject.com"
 PASSWORD = "zobfo5-tofdEf-fykbys"
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyoBrKcEl6v_L1v9PslC5u_bOMQQoPT-3QACY_nNhdjkJYf5yUut1yNTY9qJSQvEOMytA/exec"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxog4Wq0jjvR6fDL-3O4xmZ2iAlAECu0j38Ri2Ta9bZZqptnHRQAGJFmBJosJA5JsDQxw/exec"
 
 COLUMNS = [
     "Ticket Tier", "Name", "Phone number (WhatsApp preferred)", "Email", "Date of Birth", "Gender",
@@ -43,8 +45,43 @@ COLUMNS = [
     "Payment Amount"
 ]
 
-scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_FILE, scope)
+KNOWN_TIERS = {
+    "General Admission-Single Occupancy",
+    "General Admission Double Occupancy",
+    "VIP",
+    "VIP+ PLUS",
+    "Basic Access: No Accommodation",
+    "Testing",
+    "TEST"
+}
+
+from datetime import datetime
+
+def log_to_zeffy_logs(client, name, email, reason):
+    try:
+        log_sheet = client.open_by_key(SPREADSHEET_ID).worksheet("Zeffy_Logs")
+    except Exception:
+        log_sheet = client.open_by_key(SPREADSHEET_ID).add_worksheet(title="Zeffy_Logs", rows="100", cols="5")
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_row = [timestamp, "Skipped", name, email, reason]
+    log_sheet.append_row(log_row, value_input_option="RAW")
+
+
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+
+CREDENTIALS_PATH = "/var/render/secrets/google-credentials.json"
+
+creds_json = os.environ.get("GOOGLE_CREDS_JSON")
+if creds_json:
+    creds_dict = json.loads(creds_json)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+elif os.path.exists(CREDENTIALS_PATH):
+    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
+else:
+    raise ValueError("❌ Missing GOOGLE_CREDS_JSON and google-credentials.json not found.")
+
+
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID).worksheet(TAB_NAME)
 
@@ -63,7 +100,7 @@ def scrape_and_update():
     def has_next_page(page):
         next_buttons = page.query_selector_all('div.MuiGrid-container button[data-test="button"]')
         if len(next_buttons) >= 2:
-            next_button = next_buttons[1]  # Second button is the "next" arrow
+            next_button = next_buttons[1]
             class_attr = next_button.get_attribute("class") or ""
             is_disabled = "Mui-disabled" in class_attr
             return not is_disabled, next_button
@@ -94,9 +131,11 @@ def scrape_and_update():
                             if "@" in line:
                                 email = line.strip().lower()
                                 break
-                        if not email:
-                            print(f"⚠️ Could not find email for row {idx}, skipping.")
-                            continue
+                            if not email:
+                                print(f"⚠️ Could not find email for row {idx}, skipping.")
+                                log_to_zeffy_logs(client, name, "", "Missing email")
+                                continue
+
 
                         print(f"📄 Row {idx}: name='{name}', email='{email}'")
                         row.click()
@@ -104,34 +143,41 @@ def scrape_and_update():
                         time.sleep(1)
 
                         ticket_tier, amount = "", ""
-                        for attempt in range(3):
-                            ticket_tier_el = page.query_selector(".MuiDrawer-root .MuiTypography-root.MuiTypography-h6.css-1kmqxvk")
-                            if ticket_tier_el:
-                                ticket_tier = ticket_tier_el.inner_text().strip()
-                            if ticket_tier.lower() == "additional donation":
-                                fallback_tier_el = page.query_selector(".MuiDrawer-root .MuiGrid-root.MuiGrid-container.css-1d3bbye h6")
-                                ticket_tier = fallback_tier_el.inner_text().strip() if fallback_tier_el else ticket_tier
 
-                            amount_el = page.query_selector(".MuiDrawer-root h3 strong")
-                            if amount_el:
-                                amount = amount_el.inner_text().strip()
-
-                            if ticket_tier and amount:
+                        # Retry ticket tier
+                        for attempt in range(5):
+                            tier_blocks = page.query_selector_all(".MuiDrawer-root .css-15j76c0")
+                            for block in tier_blocks:
+                                h6s = block.query_selector_all("h6")
+                                for h6 in h6s:
+                                    text = h6.inner_text().strip()
+                                    if text in KNOWN_TIERS:
+                                        ticket_tier = text
+                                        break
+                                if ticket_tier:
+                                    break
+                            if ticket_tier:
                                 break
-                            print(f"⏳ Waiting for tier/amount (attempt {attempt+1})")
+                            print(f"🔁 Retry {attempt + 1}: Ticket tier not found yet, waiting…")
                             time.sleep(1)
 
-                        if not ticket_tier or not amount:
-                            print(f"⚠️ Missing tier/amount for {name}, skipping.")
-                            page.query_selector(".MuiDrawer-root button[data-test='drawer-close-button']").click()
-                            page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", state="detached", timeout=10000)
-                            continue
+                        # Retry amount
+                        for attempt in range(5):
+                            for block in tier_blocks:
+                                h3_el = block.query_selector("h3")
+                                if h3_el:
+                                    amount = h3_el.inner_text().strip()
+                                    break
+                            if amount:
+                                break
+                            print(f"🔁 Retry {attempt + 1}: Amount not found yet, waiting…")
+                            time.sleep(1)
 
-                        print(f"🎟️ Ticket Tier: {ticket_tier}")
-                        print(f"💵 Amount: {amount}")
+                        print(f"🎟️ Ticket Tier: {ticket_tier if ticket_tier else 'N/A'}")
+                        print(f"💵 Amount: {amount if amount else 'N/A'}")
 
                         qa_blocks = []
-                        for attempt in range(3):
+                        for attempt in range(5):
                             qa_blocks = page.query_selector_all('p[data-test="product-answer-label"]')
                             if qa_blocks:
                                 break
@@ -140,6 +186,7 @@ def scrape_and_update():
 
                         if not qa_blocks:
                             print(f"⚠️ No Q&A found for {name}, skipping.")
+                            log_to_zeffy_logs(client, name, email, "Missing Q&A section")
                             page.query_selector(".MuiDrawer-root button[data-test='drawer-close-button']").click()
                             page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", state="detached", timeout=10000)
                             continue
@@ -183,28 +230,39 @@ def scrape_and_update():
                 has_more, next_button = has_next_page(page)
                 if has_more:
                     print("➡️ Moving to next page…")
-                    next_button.click()
-                    page.wait_for_selector('div[data-test="table-row"]', timeout=10000)
-                    time.sleep(1)
-                else:
-                    print("⛔ No more pages")
+                    try:
+                        print("➡️ Clicking next page…")
+                        next_button.scroll_into_view_if_needed()
+                        time.sleep(0.3)
+                        next_button.click()
+                        page.wait_for_selector('div[data-test="table-row"]', timeout=8000)
+                        time.sleep(1)
+                    except Exception as e:
+                        print(f"❌ Failed to click next page: {e}")
+                        break
+
+                    else:
+                        print("⛔ No more pages")
                     break
 
             browser.close()
-
-            # ✅ Call the Apps Script web app once after all rows are added
-            try:
-                response = requests.get(WEB_APP_URL)
-                if response.status_code == 200:
-                    print("✅ Triggered processZeffyScrapedResults()")
-                else:
-                    print(f"⚠️ Failed to trigger Apps Script: {response.status_code}")
-            except Exception as e:
-                print(f"❌ Error calling Apps Script: {e}")
 
     except Exception:
         traceback.print_exc()
 
 
+# ✅ Call the new shim which blocks until complete
 if __name__ == "__main__":
-    scrape_and_update()
+    try:
+        scrape_and_update()
+    finally:
+        try:
+            print("📡 Triggering shim Apps Script (waits until it finishes)...")
+            response = requests.get(WEB_APP_URL)
+            if response.status_code == 200:
+                print("✅ Apps Script finished: " + response.text)
+            else:
+                print(f"⚠️ Apps Script failed: HTTP {response.status_code}")
+        except Exception as e:
+            print(f"❌ Error calling Apps Script shim: {e}")
+
