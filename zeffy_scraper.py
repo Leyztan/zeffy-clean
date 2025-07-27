@@ -75,11 +75,12 @@ creds_json = os.environ.get("GOOGLE_CREDS_JSON")
 
 if creds_json:
     creds_dict = json.loads(creds_json)
-    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    creds = service_account.Credentials.from_service_account_info(creds_dict).with_scopes(scope)
 elif os.path.exists(CREDENTIALS_PATH):
-    creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH)
+    creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH).with_scopes(scope)
 else:
     raise ValueError("❌ Missing GOOGLE_CREDS_JSON and google-credentials.json not found.")
+
 
 
 client = gspread.authorize(creds)
