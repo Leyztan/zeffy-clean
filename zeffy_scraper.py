@@ -98,16 +98,6 @@ def login(page):
         print("❌ Login failed. Attempting to save screenshot for debugging...")
         page.screenshot(path="/tmp/login_error.png", full_page=True)
         raise Exception("Login failed: password field not visible or redirect missing. Screenshot saved.") from e
-   
-@app.route("/debug-screenshot")
-def debug_screenshot():
-    from flask import send_file
-    screenshot_path = "/tmp/login_failure.png"
-    if os.path.exists(screenshot_path):
-        return send_file(screenshot_path, mimetype='image/png')
-    else:
-        return "Screenshot not found.", 404
-
 
 def scrape_and_update(creds=None):
     if creds is None:
