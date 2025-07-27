@@ -145,6 +145,14 @@ def webhook():
         print("❌ Exception during scrape_and_update:")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+from flask import send_file
+
+@app.route("/debug-screenshot")
+def debug_screenshot():
+    path = "/tmp/login_error.png"
+    if os.path.exists(path):
+        return send_file(path, mimetype='image/png')
+    return "No screenshot found.", 404
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
