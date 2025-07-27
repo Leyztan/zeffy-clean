@@ -8,7 +8,8 @@ app = Flask(__name__)
 
 # Credential fallback for local dev
 CREDENTIALS_PATH = "/etc/secrets/google-credentials.json"
-creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH)
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH, scopes=SCOPES)
 
 # 🧞 Genie-style UI HTML
 HTML = """
@@ -88,13 +89,12 @@ HTML = """
 </head>
 <body>
   <h1>🧞 Your wish is my command...</h1>
-  <button id="runButton" onclick="startScraping()">Start Magic</button>
+  <img id="genieLamp" src="/static/genie_lamp.jpg" alt="Genie Lamp" style="max-width: 300px; margin: 30px auto; display: block;">
+  <button id="runButton" onclick="startScraping()">Rub the Lamp</button>
   <div id="spinner" class="lds-ellipsis"><div></div><div></div><div></div><div></div></div>
   <p id="statusText"></p>
 
-  <img src="/static/genie_lamp.jpg" alt="Genie Lamp" width="150" style="margin-top: 30px;" />
   <audio id="genieSound" src="/static/genie_laugh.mp3"></audio>
-
 
   <script>
     function startScraping() {
@@ -105,7 +105,12 @@ HTML = """
 
       button.disabled = true;
       spinner.style.display = 'inline-block';
-      statusText.textContent = "✨ Gathering applications... Please wait.";
+      statusText.innerHTML = `
+        Your wish is being granted, my master.<br>
+        Please wait as I fulfill your command.<br>
+        You will have two more wishes...<br><br>
+        <em>*Genie terms and conditions do apply. No killing, true love, or bringing people back from the dead – it's not a pretty picture, I don't like doing it.</em>
+      `;
 
       sound.play();
 
@@ -138,7 +143,7 @@ def webhook():
         return jsonify({"status": "success"}), 200
     except Exception as e:
         print("❌ Exception during scrape_and_update:")
-        traceback.print_exc()  # <- Full error trace in logs
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
