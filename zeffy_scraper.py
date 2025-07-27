@@ -8,6 +8,7 @@ import requests
 import json
 import os
 from datetime import datetime
+from google.oauth2 import service_account
 
 SPREADSHEET_ID = "1aYtJlAx4VnO1aCAalzAEwRdilok-uoWgltoEJcK1pOc"
 TAB_NAME = "Zeffy_Scraped_Results"
@@ -55,7 +56,6 @@ KNOWN_TIERS = {
     "TEST"
 }
 
-from datetime import datetime
 
 def log_to_zeffy_logs(client, name, email, reason):
     try:
@@ -71,13 +71,13 @@ def log_to_zeffy_logs(client, name, email, reason):
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
 CREDENTIALS_PATH = "/var/render/secrets/google-credentials.json"
-
 creds_json = os.environ.get("GOOGLE_CREDS_JSON")
+
 if creds_json:
     creds_dict = json.loads(creds_json)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    creds = service_account.Credentials.from_service_account_info(creds_dict)
 elif os.path.exists(CREDENTIALS_PATH):
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
+    creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH)
 else:
     raise ValueError("❌ Missing GOOGLE_CREDS_JSON and google-credentials.json not found.")
 
