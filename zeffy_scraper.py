@@ -69,27 +69,44 @@ def log_to_zeffy_logs(client, name, email, reason):
 
 
 def login(page):
+   def login(page):
     print("🔐 Navigating to login page...")
-    page.goto("https://www.zeffy.com/login", timeout=60000)
-
-    # Fill email and click Next
-    page.fill("input[name='email']", EMAIL)
-    page.click("button:has-text('Next')")
-    print("➡️ Clicked 'Next', waiting for password field...")
-
-    # Wait for password field OR dump a screenshot
     try:
-        page.wait_for_selector("input[name='password']", timeout=15000)
-    except Exception:
-        print("❌ Password field not found. Saving screenshot...")
-        page.screenshot(path="/tmp/login_failure.png")
-        raise Exception("Login failed: password field not visible. Screenshot saved.")
+        page.goto("https://www.zeffy.com/login", timeout=60000)
+        print("📨 Filling in email...")
+        page.fill("input[name='email']", EMAIL)
 
-    # Continue login if password found
-    page.fill("input[name='password']", PASSWORD)
-    page.click("button:has-text('Confirm')")
-    print("✅ Logged in, waiting for post-login page...")
-    page.wait_for_url("**/o/fundraising/**", timeout=60000)
+        print("👉 Clicking 'Next' button...")
+        page.click("button:has-text('Next')")
+
+        print("🔐 Waiting for password field...")
+        page.wait_for_selector("input[name='password']", timeout=60000)
+
+        print("🔑 Filling in password...")
+        page.fill("input[name='password']", PASSWORD)
+
+        print("✅ Clicking 'Confirm'...")
+        page.click("button:has-text('Confirm')")
+
+        print("⏳ Waiting for redirect to dashboard...")
+        page.wait_for_url("**/o/fundraising/**", timeout=60000)
+
+        print("🎉 Login successful.")
+        time.sleep(2)
+
+    except Exception as e:
+        print("❌ Login failed. Attempting to save screenshot for debugging...")
+        page.screenshot(path="/tmp/login_error.png", full_page=True)
+        raise Exception("Login failed: password field not visible or redirect missing. Screenshot saved.") from e
+   
+@app.route("/debug-screenshot")
+def debug_screenshot():
+    from flask import send_file
+    screenshot_path = "/tmp/login_failure.png"
+    if os.path.exists(screenshot_path):
+        return send_file(screenshot_path, mimetype='image/png')
+    else:
+        return "Screenshot not found.", 404
 
 
 def scrape_and_update(creds=None):
