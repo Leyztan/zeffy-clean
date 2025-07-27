@@ -69,15 +69,28 @@ def log_to_zeffy_logs(client, name, email, reason):
 
 
 def login(page):
-    print("🔐 Logging in…")
-    page.goto("https://www.zeffy.com/login")
+    print("🔐 Navigating to login page...")
+    page.goto("https://www.zeffy.com/login", timeout=60000)
+
+    # Fill email and click Next
     page.fill("input[name='email']", EMAIL)
     page.click("button:has-text('Next')")
-    page.wait_for_selector("input[name='password']", timeout=60000)
+    print("➡️ Clicked 'Next', waiting for password field...")
+
+    # Wait for password field OR dump a screenshot
+    try:
+        page.wait_for_selector("input[name='password']", timeout=15000)
+    except Exception:
+        print("❌ Password field not found. Saving screenshot...")
+        page.screenshot(path="/tmp/login_failure.png")
+        raise Exception("Login failed: password field not visible. Screenshot saved.")
+
+    # Continue login if password found
     page.fill("input[name='password']", PASSWORD)
     page.click("button:has-text('Confirm')")
+    print("✅ Logged in, waiting for post-login page...")
     page.wait_for_url("**/o/fundraising/**", timeout=60000)
-    time.sleep(2)
+
 
 def scrape_and_update(creds=None):
     if creds is None:
