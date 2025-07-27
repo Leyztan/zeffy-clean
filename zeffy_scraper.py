@@ -82,6 +82,7 @@ def login(page):
 def scrape_and_update(creds=None):
     if creds is None:
         raise ValueError("❌ No credentials provided to scrape_and_update.")
+    
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(TAB_NAME)
 
@@ -98,7 +99,7 @@ def scrape_and_update(creds=None):
         sheet.resize(rows=1)
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
 
