@@ -92,7 +92,9 @@ HTML = """
   <div id="spinner" class="lds-ellipsis"><div></div><div></div><div></div><div></div></div>
   <p id="statusText"></p>
 
-  <audio id="genieSound" src="https://upload.wikimedia.org/wikipedia/commons/3/3b/Magicwand.wav"></audio>
+  <img src="/static/genie_lamp.jpg" alt="Genie Lamp" width="150" style="margin-top: 30px;" />
+  <audio id="genieSound" src="/static/genie_laugh.mp3"></audio>
+
 
   <script>
     function startScraping() {
