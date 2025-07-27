@@ -7,9 +7,6 @@ app = Flask(__name__)
 
 # Credential fallback for local dev
 CREDENTIALS_PATH = "/var/render/secrets/google-credentials.json"
-if not os.path.exists(CREDENTIALS_PATH):
-    CREDENTIALS_PATH = "/Users/ataya1/Downloads/zeffy-scraper/google-credentials.json"
-
 creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH)
 
 # 🧞 Genie-style UI HTML
