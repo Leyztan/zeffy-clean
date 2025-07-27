@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template_string
 import os
+import traceback
 from google.oauth2 import service_account
 from zeffy_scraper import scrape_and_update
 
@@ -134,7 +135,8 @@ def webhook():
         scrape_and_update(creds)
         return jsonify({"status": "success"}), 200
     except Exception as e:
-        print("❌ Error:", e)
+        print("❌ Exception during scrape_and_update:")
+        traceback.print_exc()  # <- Full error trace in logs
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
