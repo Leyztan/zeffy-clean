@@ -106,7 +106,7 @@ def scrape_and_update(creds=None):
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, slow_mo=250)
-            context = browser.new_context(user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15")
+            context = browser.new_context(user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15", storage_state="auth_state.json")
             page = context.new_page()
 
             login(page)
