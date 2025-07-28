@@ -57,47 +57,32 @@ KNOWN_TIERS = {
     "TEST"
 }
 
-
-def log_to_zeffy_logs(client, name, email, reason):
-    try:
-        log_sheet = client.open_by_key(SPREADSHEET_ID).worksheet("Zeffy_Logs")
-    except Exception:
-        log_sheet = client.open_by_key(SPREADSHEET_ID).add_worksheet(title="Zeffy_Logs", rows="100", cols="5")
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_row = [timestamp, "Skipped", name, email, reason]
-    log_sheet.append_row(log_row, value_input_option="RAW")
-
-
 def login(page):
     print("🔐 Navigating to login page...")
     try:
         page.goto("https://www.zeffy.com/login", timeout=60000)
-        print("📨 Filling in email...")
         page.fill("input[name='email']", EMAIL)
-
-        print("👉 Clicking 'Next' button...")
         page.click("button:has-text('Next')")
 
-        print("🔐 Waiting for password field...")
-        page.wait_for_selector("input[name='password']", timeout=60000)
+        for attempt in range(5):
+            try:
+                page.wait_for_selector("input[name='password']", timeout=10000)
+                break
+            except:
+                time.sleep(1)
+        else:
+            raise Exception("⚠️ Password field never became visible.")
 
-        print("🔑 Filling in password...")
         page.fill("input[name='password']", PASSWORD)
-
-        print("✅ Clicking 'Confirm'...")
         page.click("button:has-text('Confirm')")
-
-        print("⏳ Waiting for redirect to dashboard...")
         page.wait_for_url("**/o/fundraising/**", timeout=60000)
-
+        page.screenshot(path="/tmp/after-login.png", full_page=True)
         print("🎉 Login successful.")
-        time.sleep(2)
 
     except Exception as e:
-        print("❌ Login failed. Attempting to save screenshot for debugging...")
+        print("❌ Login failed. Screenshot saved to /tmp/login_error.png")
         page.screenshot(path="/tmp/login_error.png", full_page=True)
-        raise Exception("Login failed: password field not visible or redirect missing. Screenshot saved.") from e
+        raise Exception("Login failed.") from e
 
 def scrape_and_update(creds=None):
     print(f"💾 Memory available before launch: {psutil.virtual_memory().available / 1024 ** 2:.2f} MB")
@@ -121,45 +106,126 @@ def scrape_and_update(creds=None):
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, slow_mo=250)
-            context = browser.new_context()
+            context = browser.new_context(user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15")
             page = context.new_page()
 
             login(page)
             page.goto(CAMPAIGN_URL)
             page.wait_for_selector('div[data-test="table-row"]', timeout=120000)
 
-            page_number = 1
-            max_pages = 10
-
-            while page_number <= max_pages:
+            while True:
                 participant_rows = page.query_selector_all('div[data-test="table-row"]')
-                print(f"✅ Found {len(participant_rows)} participants on page {page_number}")
+                print(f"✅ Found {len(participant_rows)} participants on this page")
 
                 for idx, row in enumerate(participant_rows, start=1):
                     try:
-                        # ... [your row processing logic remains unchanged] ...
-                        pass  # Replace this line with your full row logic
+                        for _ in range(5):
+                            try:
+                                row.click()
+                                page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", timeout=5000)
+                                break
+                            except:
+                                time.sleep(1)
+
+                        cells = row.query_selector_all("td")
+                        name = cells[2].inner_text().strip()
+                        email = ""
+                        for line in cells[2].inner_text().split("\n"):
+                            if "@" in line:
+                                email = line.strip().lower()
+                                break
+                        if not email:
+                            print(f"⚠️ Could not find email for row {idx}, skipping.")
+                            continue
+
+                        ticket_tier, amount = "", ""
+                        for attempt in range(5):
+                            tier_blocks = page.query_selector_all(".MuiDrawer-root .css-15j76c0")
+                            for block in tier_blocks:
+                                h6s = block.query_selector_all("h6")
+                                for h6 in h6s:
+                                    text = h6.inner_text().strip()
+                                    if text in KNOWN_TIERS:
+                                        ticket_tier = text
+                                        break
+                                if ticket_tier:
+                                    break
+                            if ticket_tier:
+                                break
+                            time.sleep(1)
+
+                        for attempt in range(5):
+                            amount_el = page.query_selector(".MuiDrawer-root .css-6orjuc")
+                            if amount_el:
+                                amount = amount_el.inner_text().strip()
+                                break
+                            time.sleep(1)
+
+                        if not ticket_tier or not amount:
+                            print(f"⚠️ Missing tier/amount for {name}, skipping.")
+                            page.query_selector(".MuiDrawer-root button[data-test='drawer-close-button']").click()
+                            page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", state="detached", timeout=10000)
+                            continue
+
+                        qa_blocks = []
+                        for attempt in range(5):
+                            qa_blocks = page.query_selector_all('p[data-test="product-answer-label"]')
+                            if qa_blocks:
+                                break
+                            time.sleep(1)
+
+                        if not qa_blocks:
+                            print(f"⚠️ No Q&A found for {name}, skipping.")
+                            page.query_selector(".MuiDrawer-root button[data-test='drawer-close-button']").click()
+                            page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", state="detached", timeout=10000)
+                            continue
+
+                        answers_map = {}
+                        for block in qa_blocks:
+                            question = block.inner_text().strip()
+                            parent = block.evaluate_handle("el => el.parentElement")
+                            answer = ""
+                            input_el = parent.query_selector('input.MuiInputBase-input')
+                            if input_el:
+                                answer = input_el.get_attribute("value").strip()
+                            if not answer:
+                                dropdown_el = parent.query_selector('div[role="combobox"]')
+                                if dropdown_el:
+                                    answer = dropdown_el.inner_text().strip()
+                            if not answer:
+                                editor_el = parent.query_selector('div[data-test="answer-editor-simple-answer"]')
+                                if editor_el:
+                                    answer = " ".join(child.inner_text().strip() for child in editor_el.query_selector_all("div") if child.inner_text().strip())
+
+                            match = get_close_matches(question, COLUMNS[1:-1], n=1, cutoff=0.6)
+                            if match:
+                                answers_map[match[0]] = answer
+
+                        row_data = [ticket_tier] + [answers_map.get(col, "") for col in COLUMNS[1:-1]] + [amount]
+                        sheet.append_row(row_data)
+                        print(f"✅ Added {name} to Google Sheet")
+
+                        page.query_selector(".MuiDrawer-root button[data-test='drawer-close-button']").click()
+                        page.wait_for_selector(".MuiDrawer-root.MuiDrawer-modal", state="detached", timeout=10000)
+                        time.sleep(0.5)
 
                     except Exception as e:
-                        print(f"⚠️ Error processing row {idx}: {e}")
+                        print(f"⚠️ Error processing {name if 'name' in locals() else idx}: {e}")
                         traceback.print_exc()
                         continue
 
                 has_more, next_button = has_next_page(page)
-                if has_more:
-                    print(f"➡️ Page {page_number} complete. Moving to next page…")
+                if has_more and next_button.is_visible():
                     try:
                         next_button.scroll_into_view_if_needed()
-                        time.sleep(0.3)
                         next_button.click()
                         page.wait_for_selector('div[data-test="table-row"]', timeout=8000)
                         time.sleep(1)
-                        page_number += 1
                     except Exception as e:
                         print(f"❌ Failed to click next page: {e}")
                         break
                 else:
-                    print("⛔ No more pages available.")
+                    print("⛔ No more pages or next button is not visible.")
                     break
 
             context.close()
@@ -167,26 +233,3 @@ def scrape_and_update(creds=None):
 
     except Exception:
         traceback.print_exc()
-
-
-if __name__ == "__main__":
-    from google.oauth2 import service_account
-    creds = service_account.Credentials.from_service_account_file(
-        "/etc/secrets/google-credentials.json",
-        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    )
-    try:
-        scrape_and_update(creds)
-    except Exception as e:
-        print("Error running directly:", e)
-    finally:
-        try:
-            print("📡 Triggering shim Apps Script (waits until it finishes)...")
-            response = requests.get(WEB_APP_URL)
-            if response.status_code == 200:
-                print("✅ Apps Script finished: " + response.text)
-            else:
-                print(f"⚠️ Apps Script failed: HTTP {response.status_code}")
-        except Exception as e:
-            print(f"❌ Error calling Apps Script shim: {e}")
-
